@@ -7,3 +7,10 @@ node_modules/
 
 # OS noise
 .DS_Store
+
+# Local secrets and generated verification output
+.env
+.env.*
+!.env.example
+*.local.json
+dist/

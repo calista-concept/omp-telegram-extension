@@ -1,161 +1,91 @@
-# omp Telegram Bridge
+# OMP Telegram session bridge
 
-Control [omp](https://github.com/oh-my-pi/omp) from Telegram. Send prompts from your phone, watch the agent work in real time, get notified when it finishes — and see tasks you started in the terminal right in your chat.
+Version 2 is a **fail-closed breaking security change** for OMP 18.12.6. Telegram is OFF for every new, forked, or recreated session, including sessions sharing a process or working directory. Merely loading the extension, configuring a bot, selecting a poller, or capturing a command context never authorizes a session. Control permission authorizes inbound actions, never publication of native session content.
 
-```
-You:  fix the failing tests in src/auth
-Bot:  🚀 OMP started (from the terminal)
-      📋 fix the failing tests in src/auth
-      Send /status for progress or /stop to cancel.
+## Local commands
 
-Bot:  📋 Agent plan (3/7)
-      🔄 Fix token expiry check
-      ⬜ Update middleware tests
-      ⬜ Regenerate fixtures
+Run these commands in the OMP terminal, not Telegram:
 
-Bot:  ✅ OMP finished
-      ⏱ 4m 12s
-      📝 Result:
-      All 14 tests pass. The expiry check now ...
-```
+| Command | Effect on the exact current session |
+| --- | --- |
+| `/telegram` or `/telegram on` | Enable generic working/completion/status notifications; reset remote control to OFF |
+| `/telegram off` | Revoke notifications and control, invalidate queued work and abort in-flight requests |
+| `/telegram status` | Report local configuration and permissions; works with no credentials |
+| `/telegram test` | Send a fixed content-free test notification, only if this session is enabled |
+| `/telegram control on` | Separately authorize inbound prompts, opaque ask choices and remote session operations; notifications must already be ON |
+| `/telegram control off` | Remove control permission while retaining generic notifications |
 
-## Features
+Version 2 replaces the old `/tg` command rather than retaining its global-control semantics or a deprecated shim. `/telegram on` deliberately resets a previously granted control permission; enabling notifications is never an implicit control grant.
 
-- **Two-way prompts** — messages you send in Telegram become omp prompts; the agent's final answer is delivered back to the chat.
-- **Terminal tasks are visible** — start a task in your terminal and the bot still announces it, streams todo/plan progress, and notifies you on completion. Telegram is a full control surface, not just a prompt box.
-- **`/status`** — what every omp instance is doing right now (prompt, elapsed time, working directory), across all running instances.
-- **`/stop`** — abort the running task, even if it was started in a terminal or in another omp instance.
-- **Live plan tracking** — when the agent uses its todo tool, the bot posts a plan message and edits it as items complete.
-- **Ask-tool mirroring** — when the agent asks a question with options, it appears in Telegram as inline buttons; tap one and your answer is fed back to the agent.
-- **Multi-instance aware** — run omp in several projects at once. One instance polls Telegram; the others stand by. Commands route to whichever instance owns the running task, and if the polling instance dies or hangs, a standby takes over within ~30 seconds.
-- **Rich formatting** — replies render Telegram HTML: headings, bold, code blocks with syntax highlighting, links, quotes.
+Local permission commands reconcile session identity without starting a poll or draining an inbox first. Their permission changes therefore take precedence over authorized remote work that was queued but not yet invoked.
 
-## Commands
+Lifecycle notifications contain only fixed working/finished text **in every mode, including control ON**. The bridge never exports native session titles, prompts, answers, paths, files, source, research, plans, credentials, tool arguments, ask questions, native option labels or working directories. Control is not a content-publication grant, and there is no content-export command. Test messages likewise contain no session content. A completed HTTP request is not proof of delivery; the local test result says so explicitly.
 
-| Command | Description |
-|---|---|
-| `/start` or `hello` | Connection test |
-| `/status` | All running tasks across all omp instances |
-| `/stop` | Stop the current task (local or remote instance) |
-| `/instances` | List live omp instances; tap to switch which one polls Telegram |
-| `/use <n>` | Switch the active poller to instance *n* |
-| `/sessions` | List recent omp sessions |
-| `/resume <n>` | Switch this instance to a recent session |
-| `/new` | Start a fresh session in this instance |
-| `/tg` | One-time arming command in the omp terminal — enables session switching from Telegram |
+## Credentials and installation
 
-## Requirements
+The bridge requires both `OMP_TELEGRAM_BOT_TOKEN` and an explicitly configured positive integer `OMP_TELEGRAM_USER_ID`. There is **no author-ID fallback**. Invalid or missing credentials mean no Telegram requests, no polling/standby timers and no registry creation or disclosure. Local commands remain available. The extension never asks for credentials in a prompt, logs tokens, logs Telegram response bodies, or emits token-containing URLs/errors.
 
-- [omp](https://github.com/oh-my-pi/omp) installed (`omp --version` to check)
-- A Telegram bot token (via [@BotFather](https://t.me/BotFather) — see below)
-- Your Telegram user id (see below)
+Obtain credentials independently from Telegram's native bot/account interfaces. Supply them securely in the environment of the OMP process; do not place real values in source, Git, a session prompt, shell history, screenshots, or a shared configuration. Protect the parent launch environment. Reloading an extension or restarting an OMP process is an operator decision; this repository does not modify a live installation.
 
-## Setup
+Optional macOS integration: an operator-owned launcher may retrieve an already stored bot token from the **local macOS Keychain** using the native `security find-generic-password -w` interface and export it only to its child OMP process. Use an operator-chosen service/account; the extension does not create Keychain items, implement OAuth, copy credentials, or provide a real-value configuration. Do not print the value or enable shell tracing. A Keychain access failure must leave the credential absent, not select another account or a fallback token.
 
-### 1. Create a bot with @BotFather
+Install the reviewed `telegram.ts` through OMP's normal local extension loading mechanism (for example a local extension file or symlink). No runtime dependency beyond OMP and Bun's Node-compatible APIs is needed. Do not install an older upstream version over this fork: its trust model is incompatible.
 
-1. Open Telegram and message [@BotFather](https://t.me/BotFather).
-2. Send `/newbot`.
-3. Choose a display name (e.g. `My OMP Bridge`).
-4. Choose a username — must end in `bot` (e.g. `paneww_omp_bot`).
-5. BotFather replies with a **token** like:
-   ```
-   123456789:AAHKDiUXZoudb0wq0nlJO7hWKzYzR0PR7iE
-   ```
-   Keep it secret — anyone with the token can control your bot.
+After installation, configure credentials outside OMP, open the intended session, and enable `/telegram on` locally. `/telegram test` sends directly to the explicit user's private chat; no remembered last chat or Telegram handshake is trusted. Group/channel chats are rejected even when their sender matches the configured user.
 
-Optional but recommended: in BotFather, send `/setprivacy` → select your bot → **Disable**, so the bot can receive all messages (the bridge only processes messages from your user id anyway).
+## Session identity and persistence
 
-### 2. Get your Telegram user id
+Durable grants bind the native session header ID and creation timestamp **and the transcript file incarnation** (device, inode and birth time), not cwd, process ID, title or a pathname alone. Normal resume/restart of that exact session preserves its separately granted permissions. Title changes and a filesystem rename retaining the same incarnation do not grant a different session access. A moved current session updates its known grant path on the next native event/heartbeat. If another instance observes a missing path during a relocation, access may be conservatively revoked; re-enable locally rather than inferring a replacement identity. Deletion/recreation or replacement of the file, even with copied header contents, is OFF. A native operation that atomically replaces a transcript's incarnation also requires local reauthorization. This conservative boundary is intentional.
 
-The bridge only accepts commands from one user id (yours). To find it:
+OMP can advertise a session file before physically creating it. Enabling that unsaved session appends a small native custom anchor (native ID and random nonce, no credentials) and creates an **ephemeral instance/native-ID-bound grant**. It does not manufacture a user/assistant message or contact a provider. Once that same live native session materializes, its grant is promoted to the durable identity; another/forked native ID cannot inherit it. An unsaved session that shuts down has no resumable transcript and therefore no recoverable grant. A reload/restart cannot recover an orphaned pending grant.
 
-1. Message [@userinfobot](https://t.me/userinfobot) — it replies with your `Id` immediately; or
-2. Message [@RawDataBot](https://t.me/RawDataBot) and look for `"id"` under `chat` / `from`; or
-3. Start the bridge with a placeholder id (step 3), send any message to your bot, and copy the id from the log line `[telegram] Ignoring unauthorized user <id>`.
+Fork/new/session-branch events invalidate pending operations. New/forked identities remain OFF even if native history contains a copied custom anchor. Authorization is never recovered by searching session directories. Remote listings inspect only already authorized grant records.
 
-> Note: the id is a number like `1087156700` — **not** your @username.
+## Remote commands (explicit control required)
 
-### 3. Configure environment variables
+Only the explicitly configured sender in that same private user chat is accepted. Every command, inbox item and callback rechecks its precise controlling session, target session, instance nonce, live lease, grant revision and session epoch immediately before effects. Revocation or switching invalidates stale callbacks, queued inbox work, asynchronous poll batches and later message chunks. Aborting an HTTP request cannot retract a fixed notification already delivered to Telegram; no native session content is included even before revocation.
 
-Add to your shell profile (`~/.zshrc`, `~/.bashrc`, …):
+| Telegram command | Behavior |
+| --- | --- |
+| `/status`, `/start` | Generic idle/working response for the selected authorized control session |
+| `/stop` | Abort only the selected authorized session, never broadcast to all tasks |
+| Plain text | Queue a prompt only in the selected explicitly control-authorized session |
+| `/instances` | List opaque IDs of live control-authorized instances only |
+| `/use <instance-id>` | Select an already authorized controlling instance; never authorize a target or inherit access from poller ownership |
+| `/sessions` | List opaque IDs of existing, explicitly control-authorized sessions only; no title/cwd/path enumeration |
+| `/resume <session-id>` | Resume only a separately control-authorized target, from an authorized controlling session |
+| `/new` | Create a session that is OFF; no success message or subsequent prompt is sent from the new unauthorized session |
 
-```bash
-export OMP_TELEGRAM_BOT_TOKEN="123456789:AAHKDiUXZoudb0wq0nlJO7hWKzYzR0PR7iE"
-export OMP_TELEGRAM_USER_ID="1087156700"
-```
+In notifications-only mode, `/status` produces a fixed content-free notification-mode response. Other inbound commands, asks and callbacks have no effect. Unknown slash commands are ignored, not submitted as prompts. Numeric menu indices and legacy `inst:`, `sess:` and `ask:` callbacks are intentionally unsupported: an old menu must not accidentally select a different current session.
 
-Then `source ~/.zshrc` (or open a new terminal).
+Remote new/resume additionally require an idle target and a command context captured by an authorized local `/telegram control on` command in that exact session. Switching does not auto-arm the destination. No remote operation is cached to execute after a future local enable command.
 
-`OMP_TELEGRAM_BOT_TOKEN` is **required** — without it the extension logs `[telegram] Missing OMP_TELEGRAM_BOT_TOKEN` and stays inactive. `OMP_TELEGRAM_USER_ID` is **required** for anyone other than the author (the author's id is used as fallback for backwards compatibility).
+The precise session and grants are checked immediately before invoking native new/resume; that authorized invocation is the native effect's linearization point. Authorization is checked again in OMP's `session_before_switch` cancellation hook for a delayed invocation. OMP 18.12.6 exposes no AbortSignal/commit guard for an already accepted native transition, so revocation does not retroactively roll it back during OMP's internal awaits. Revocation still rejects not-yet-invoked work, suppresses every subsequent Telegram effect, and leaves a new session OFF.
 
-### 4. Install the extension
+Control ON enables only a generic waiting-for-input notification and opaque `Choice 1`, `Choice 2`, … buttons for native asks. Questions, option labels and descriptions remain local; review the question and choice ordering in OMP's terminal before selecting a button. The question/option mapping stays in memory in the owning instance, never in a Telegram payload or standing registry metadata. A button queues the mapped follow-up user prompt locally; it **does not resolve OMP's native ask dialog**. Terminal answers/tool completion expire its buttons. Buttons are single-use and cannot select another instance/session through a stale index. Assistant answers and todo plans are never exported, whether control is ON or OFF.
 
-Copy the extension file into omp's extensions directory:
+## Private multi-instance coordination
 
-```bash
-mkdir -p ~/.omp/agent/extensions
-curl -o ~/.omp/agent/extensions/telegram.ts \
-  https://raw.githubusercontent.com/calista-concept/omp-telegram-extension/main/telegram.ts
-```
+Each bot/user pair has a hash-namespaced registry under `~/.omp/telegram-private/` (directory mode `0700`, files `0600`). The namespace is not a credential. The registry stores only grant/file-identity bindings, ephemeral instance references/leases, the Telegram update cursor, leader/controller references, and short-lived inbox envelopes. It does not publish cwd, titles, prompts, answers, task text or ask content as standing instance metadata. A pending authorized inbound prompt can exist briefly in a private inbox until consumed; treat the directory as private local state, not an exportable diagnostics file. Revocation tombstones contain no content and prevent stale persisted grants from returning even when registry-lock contention prevents cleanup.
 
-Or clone and symlink, if you prefer to track updates:
+Short synchronous transactions use an exclusive directory lock and atomic registry replacement. Dead-owner lock reclamation elects one reaper by unlinking that unique owner's file before removing the lock directory. A live or ownerless lock fails closed; a local operator may recover an ownerless lock **only after confirming all bridge instances are stopped**. There is no unsafe age-only lock stealing.
 
-```bash
-git clone https://github.com/calista-concept/omp-telegram-extension.git ~/.omp/omp-telegram-bridge
-mkdir -p ~/.omp/agent/extensions
-ln -s ~/.omp/omp-telegram-bridge/telegram.ts ~/.omp/agent/extensions/telegram.ts
-```
+Only one lease-elected instance polls a bot; authorized standbys consume their own fenced inboxes and can take over after a dead/stale leader. Poll responses recheck leadership epochs before routing or committing the shared cursor. `/use` changes the controller, not access grants. Poller leadership itself carries no target-session permission. The first activation drops old Telegram backlog; later leaders adopt the shared cursor. Telegram transport is not an exactly-once message queue: a crash between delivery and cursor persistence can lose or replay an update. All replayed effects still require current authorization. The bridge deliberately does not claim remote control or real delivery has been verified merely because registry configuration exists.
 
-### 5. Arm session switching (one-time, per machine)
+## Migration from upstream v1
 
-omp only exposes session-switching APIs to command handlers, so the bridge uses a tiny helper command:
+1. Stop/reload older bridge instances through your normal maintenance procedure; do not run old and new trust models against the same bot concurrently.
+2. Do not import the old `~/.omp/telegram-bridge.json`: it contains global last-chat, cwd, prompt and instance state, not trustworthy session grants. This fork neither reads nor rewrites it. Remove/archive that sensitive old file locally if appropriate.
+3. Configure both explicit environment credentials securely. The old personal author-ID fallback is gone.
+4. Every session initially remains OFF. Enable notifications locally per intended session, then separately enable control only for sessions you intend to expose to Telegram.
+5. Replace `/tg` with `/telegram`, and replace old numbered menus/callbacks with the new opaque authorized IDs. There is no one-time global arming or deprecated command shim.
+6. Automatic assistant-answer and todo-plan exports are intentionally removed, even with control ON. Native ask text/labels are replaced with fixed waiting text and opaque numbered choices. There is no replacement content-export permission.
 
-1. Start omp in any project: `omp`
-2. Type `/tg` once
+## Deterministic tests
 
-You'll see `[telegram] Command context captured via /tg` in the omp log. This arms `/new` and `/resume <n>` from Telegram. It persists for the lifetime of that omp instance — rerun `/tg` after restarting omp.
+`test/` drives the actual extension's registered commands/events, mocked Telegram transport, private on-disk registry, injected clock/liveness and manual interval callbacks. Every fixture uses a fresh temporary directory; no test reads a real home, live OMP config, Telegram credentials or Telegram network. Coverage includes default OFF, same-process/cwd A/B isolation, durable resume/restart, pending unsaved identity promotion, forks/deletion/recreation, separate control, sender/chat denial, opaque listings, remote new/resume, callback/inbox fencing, local revocation priority, pending-request AbortSignal fencing, leader failover/cursor adoption and lock contention. Consumer-visible payload assertions verify that even control ON never publishes sentinel prompts, answers, source, credentials, tool arguments or native ask labels, while opaque choices still map to the correct local follow-up.
 
-### 6. Test it
-
-1. Open your bot in Telegram, send `hello` → the bot replies `🤖 OMP Telegram bridge is working!`
-2. Start omp in a project, send `what files changed recently?` → the bot announces the task and replies with the result when done.
-
-## Multi-instance behavior
-
-Run omp in as many projects as you like. The extensions coordinate through a shared registry file (`~/.omp/telegram-bridge.json`):
-
-- Exactly one instance **polls Telegram** (the leader, 🟢 in `/instances`); the others stand by.
-- A task running in *any* instance shows up in `/status` and can be stopped with `/stop` — the command is routed to the instance that owns the task.
-- Ask-poll button taps are routed the same way.
-- If the leader's process dies — or freezes (stale heartbeat for >30 s) — a standby takes over automatically and adopts the message offset, so no messages are lost.
-
-`/instances` lists everything with a `Switch to …` button to hand the poller role to another instance (useful when you want the bot tied to a specific project's session).
-
-## Security notes
-
-- **Only your user id** is accepted; every other sender is ignored and logged.
-- The bot token grants full control of the bot — store it in your shell profile, not in the repo.
-- Anyone with the token *and* ability to run commands on your machine could impersonate you; treat the token like a password.
-- The registry file (`~/.omp/telegram-bridge.json`) contains no secrets — just pids, prompts, and chat ids.
-
-## Files
-
-| Path | Purpose |
-|---|---|
-| `~/.omp/agent/extensions/telegram.ts` | The extension (single file, no dependencies beyond omp itself) |
-| `~/.omp/telegram-bridge.json` | Shared coordination registry (auto-created) |
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---|---|
-| `[telegram] Missing OMP_TELEGRAM_BOT_TOKEN` in the omp log | `OMP_TELEGRAM_BOT_TOKEN` isn't set in the environment omp sees. Export it in the shell profile and restart omp. |
-| Bot replies nothing, log shows `Ignoring unauthorized user <id>` | Put that id in `OMP_TELEGRAM_USER_ID` and restart omp. |
-| `409 Conflict` from getUpdates in the log | Another process (or an old omp instance) is polling with the same token. Stop it, or `/use` another instance. |
-| `/resume` or `/new` says session switching isn't armed | Run `/tg` once in that instance's terminal, then retry. |
-| Terminal task started but no notification | The bridge notifies the last chat that talked to the bot. Send `hello` once from Telegram first. |
-| Two omp instances, but `/status` shows only one | The second instance was started before the extension loaded — restart it so it registers. |
+Verified with Bun 1.3.14, OMP SDK 18.12.6 and TypeScript 5.9.3: all 32 deterministic tests pass (153 assertions), typecheck and Bun bundle pass. The real patched native CLI also loads the extension and executes `/telegram status` as unconfigured/OFF with zero agent turns. A separate Codex OAuth identity completed an independent focused security review with no material findings. Run `bun run test` and `bun --bun run typecheck` to reproduce the package gates. Real Telegram account/device delivery is not tested; no bot credentials or live configuration are included.
 
 ## License
 
