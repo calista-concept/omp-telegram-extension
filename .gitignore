@@ -1,0 +1,9 @@
+# Local coordination state
+telegram-bridge.json
+telegram-bridge.json.*.tmp
+
+# Dependencies
+node_modules/
+
+# OS noise
+.DS_Store
